@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deriv Live Signal Analyzer</title>
+<style>
+:root{--bg:#07111f;--card:#0d1b2d;--line:#20334c;--text:#edf5ff;--muted:#8fa6bf;--accent:#35d07f;--warn:#ffca58;--bad:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#06101d,#0b1727);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1200px;margin:auto;padding:20px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:25px;margin:0}.sub{color:var(--muted);margin-top:4px}.status{padding:8px 12px;border:1px solid var(--line);border-radius:999px}.ok{color:var(--accent)}.bad{color:var(--bad)}
+.grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;margin-top:18px}.card{background:rgba(13,27,45,.94);border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:0 12px 35px #0003}
+label{display:block;color:var(--muted);font-size:12px;margin:12px 0 6px}select,input,button{width:100%;padding:11px;border-radius:10px;border:1px solid var(--line);background:#081523;color:var(--text)}
+button{cursor:pointer;font-weight:700}button.primary{background:#15945a;border-color:#15945a}.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.signal{display:grid;grid-template-columns:1.1fr .9fr;gap:14px}.hero{min-height:250px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;border:1px solid var(--line);border-radius:14px;background:#091727}
+.contract{font-size:13px;color:var(--muted);letter-spacing:.08em}.digit{font-size:86px;font-weight:900;line-height:1;margin:12px}.action{font-size:26px;font-weight:800}.confidence{font-size:16px;color:var(--warn);margin-top:8px}.count{font-size:30px;font-variant-numeric:tabular-nums}
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.metric{border:1px solid var(--line);border-radius:12px;padding:12px}.metric b{display:block;font-size:21px;margin-top:5px}.muted{color:var(--muted)}
+table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left}th{color:var(--muted);font-size:12px}
+.bar{height:8px;background:#15263a;border-radius:99px;overflow:hidden}.fill{height:100%;background:var(--accent)}
+.log{height:150px;overflow:auto;background:#06101b;border-radius:10px;padding:10px;font:12px ui-monospace,monospace;white-space:pre-wrap}
+.warn{color:var(--warn);font-size:12px;line-height:1.5}.scanStatus{margin-top:10px;padding:10px;border-radius:10px;background:#081523;border:1px solid var(--line);color:var(--muted);font-weight:700}.scanning{animation:pulse 1s infinite}.done{color:var(--accent)}@keyframes pulse{50%{opacity:.45}}.full{grid-column:1/-1}
+@media(max-width:850px){.grid,.signal{grid-template-columns:1fr}.wrap{padding:12px}.digit{font-size:70px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <div><h1>Deriv Live Signal Analyzer</h1><div class="sub">Choose category → group → exact index • analyzer chooses the signal • signal expires after 15 seconds</div></div>
+    <div id="wsStatus" class="status">● Connecting…</div>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h3>Market & strategy</h3>
+      <label>Market category</label>
+      <select id="marketCategory">
+        <option value="all">All available markets</option>
+        <option value="synthetic">Synthetic indices</option>
+        <option value="vol1s">Volatility / 1s</option>
+        <option value="crypto">Cryptocurrency</option>
+        <option value="indices">Indices</option>
+        <option value="forex">Forex</option>
+        <option value="commodities">Commodities</option>
+        <option value="other">Other active markets</option>
+      </select>
+      <label>Market group</label><select id="marketGroup"><option>Loading…</option></select>
+      <label>Market</label><select id="market"><option>Loading markets…</option></select>
+      <label>Mode</label>
+      <select id="mode">
+        <option value="AUTO">AUTO — choose strongest available signal</option>
+        <option value="MATCH">MATCH — choose digit</option>
+        <option value="DIFFERS">DIFFERS — choose digit to avoid</option>
+        <option value="OVER">OVER — choose barrier</option>
+        <option value="UNDER">UNDER — choose barrier</option>
+        <option value="RISE">RISE</option><option value="FALL">FALL</option>
+      </select>
+      <div class="row">
+        <div><label>Analysis ticks</label><select id="window"><option>100</option><option selected>200</option><option>500</option><option>1000</option></select></div>
+        <div><label>Minimum signal %</label><input id="minConf" type="number" min="50" max="95" step="1" value="60"></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="primary" id="scanBtn">🔎 SCAN &amp; PREDICT</button>
+        <button id="copyBtn">COPY PREDICTION</button>
+      </div>
+      <div id="scanStatus" class="scanStatus">Select a market, then press SCAN &amp; PREDICT.</div>
+      <label>Account connection</label>
+      <div class="row"><button class="primary" id="connectBtn">Connect Deriv</button><button id="demoBtn">Demo setup</button></div>
+      <p class="warn">Market coverage: the selector reads Deriv's live active-symbol catalogue, so newly supported Volatility, Crash/Boom, Range Break and other markets can appear without rewriting the list.</p>
+      <p class="warn">Security: this page never asks for your Deriv password. For a production login, use Deriv OAuth 2.0/PKCE or paste a Personal Access Token into a secure backend. Do not put a real token into public HTML.</p>
+      <div class="metrics">
+        <div class="metric">Ticks <b id="tickCount">0</b></div>
+        <div class="metric">Last digit <b id="lastDigit">—</b></div>
+        <div class="metric">Quote <b id="quote">—</b></div>
+        <div class="metric">Server time <b id="serverTime">—</b></div>
+      </div>
+    </section>
+
+    <section class="card signal">
+      <div class="hero">
+        <div class="contract" id="contract">WAITING FOR DATA</div>
+        <div class="contract" style="margin-top:10px;color:var(--accent);font-weight:800">PREDICTION NUMBER TO ENTER</div>
+        <div class="digit" id="signalDigit">—</div>
+        <div class="action" id="signalAction">WAIT</div>
+        <div class="confidence" id="confidence">Collecting ticks…</div>
+        <button id="acceptBtn" class="primary" style="width:auto;margin-top:14px;padding:12px 24px;display:none">START 15-SECOND SIGNAL</button>
+        <div id="expired" class="warn" style="display:none;margin-top:10px">Signal expired — recalculating a new signal.</div>
+      </div>
+      <div>
+        <h3>15-second entry</h3>
+        <div class="metric"><span class="muted">Next window</span><b id="entryWindow">—</b></div>
+        <div class="metric" style="margin-top:10px"><span class="muted">Entry countdown</span><b class="count" id="countdown">—</b></div>
+        <div class="metric" style="margin-top:10px"><span class="muted">Model decision</span><b id="decision">WAIT</b></div>
+        <p class="muted" id="reason">The analyzer will automatically score digits and direction once enough live data is available.</p>
+      </div>
+    </section>
+
+    <section class="card full">
+      <h3>Digit distribution</h3>
+      <table><thead><tr><th>Digit</th><th>Count</th><th>Share</th><th>Bar</th></tr></thead><tbody id="digits"></tbody></table>
+    </section>
+
+    <section class="card">
+      <h3>Backtest / evidence</h3>
+      <div class="metrics">
+        <div class="metric">Evaluated <b id="btN">0</b></div>
+        <div class="metric">Hit rate <b id="btRate">—</b></div>
+        <div class="metric">Wins <b id="btWins">0</b></div>
+        <div class="metric">Losses <b id="btLoss">0</b></div>
+      </div>
+      <p class="warn">This is historical signal accuracy, not a guarantee of future wins. A signal is suppressed when the evidence is below the configured threshold.</p>
+    </section>
+
+    <section class="card">
+      <h3>Connection log</h3><div id="log" class="log"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const PUBLIC_WS="wss://api.derivws.com/trading/v1/options/ws/public";
+let ws=null, subId=null, symbols=[], ticks=[], currentSymbol=null, serverEpoch=Math.floor(Date.now()/1000), lastTickEpoch=0;
+let activeSignal=null, signalTimer=null, signalLocked=false, scanning=false, scanRequested=false;
+const $=id=>document.getElementById(id);
+function log(s){$("log").textContent=new Date().toLocaleTimeString()+"  "+s+"\\n"+$("log").textContent.slice(0,7000)}
+function setStatus(s,good=false){$("wsStatus").textContent="● "+s;$("wsStatus").className="status "+(good?"ok":"bad")}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o))}
+function digitOf(q){
+  const s=String(q);
+  const clean=s.replace(/[^0-9]/g,"");
+  return clean ? Number(clean.slice(-1)) : null;
+}
+function speak(text){
+  try{
+    if(!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.rate=0.92; u.pitch=1; u.volume=1;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+function setScanStatus(text,kind=''){
+  const el=$("scanStatus"); el.textContent=text; el.className='scanStatus '+kind;
+}
+function startScan(){
+  if(!currentSymbol){setScanStatus('Choose a market first.','');return}
+  clearSignalTimer(); activeSignal=null; signalLocked=false; scanRequested=true; scanning=true;
+  $("acceptBtn").style.display='none'; $("expired").style.display='none';
+  $("signalAction").textContent='ANALYZING…'; $("signalDigit").textContent='…';
+  setScanStatus('Analyzing '+currentSymbol+'… collecting recent ticks and calculating the prediction.','scanning');
+  speak('Analyzing '+currentSymbol);
+  const n=Number($("window").value)||200;
+  ticks=[];
+  send({ticks_history:currentSymbol,end:'latest',count:n,style:'ticks',subscribe:0,req_id:30});
+  send({ticks:currentSymbol,subscribe:1,req_id:31});
+}
+function finishScanVoice(action,value,conf){
+  scanning=false; scanRequested=false;
+  const val=(value!=='' && value!==undefined && value!==null)?String(value):action;
+  setScanStatus('Done — prediction is ready. Place your trade manually within the 15-second window.','done');
+  if(action==='MATCH') speak('Done. Prediction number '+val+'. Match '+val+'.');
+  else if(action==='DIFFERS') speak('Done. Prediction number '+val+'. Differs from '+val+'.');
+  else if(action==='OVER') speak('Done. Prediction barrier '+val+'. Over '+val+'.');
+  else if(action==='UNDER') speak('Done. Prediction barrier '+val+'. Under '+val+'.');
+  else speak('Done. Prediction is '+action+'.');
+}
+function connect(){
+  if(ws) try{ws.close()}catch(e){}
+  setStatus("Connecting…"); ws=new WebSocket(PUBLIC_WS);
+  ws.onopen=()=>{setStatus("Live",true);log("Connected to Deriv public WebSocket");send({active_symbols:"full",req_id:1});};
+  ws.onclose=()=>{setStatus("Disconnected");log("WebSocket closed — retrying in 3s");setTimeout(connect,3000)};
+  ws.onerror=()=>{setStatus("WebSocket error")};
+  ws.onmessage=e=>handle(JSON.parse(e.data));
+}
+function marketCategory(x){
+  const market=String(x.market||"").toLowerCase();
+  const sub=String(x.submarket||"").toLowerCase();
+  const name=String(x.underlying_symbol_name||"").toLowerCase();
+  const type=String(x.underlying_symbol_type||"").toLowerCase();
+  if(/volatility|1\(s\)|1s/.test(name+" "+sub+" "+type) || /1hz\d+v/.test(String(x.underlying_symbol||"").toLowerCase())) return "vol1s";
+  if(market.includes("synthetic") || /random|crash|boom|jump|range|step|drift|volatility/.test(name+" "+sub)) return "synthetic";
+  if(market.includes("crypto") || type.includes("crypto")) return "crypto";
+  if(market.includes("indices") || market==="index" || type.includes("index")) return "indices";
+  if(market.includes("forex") || type.includes("forex")) return "forex";
+  if(market.includes("commodity") || type.includes("commodity") || /gold|silver|oil|gas|copper|platinum/.test(name)) return "commodities";
+  return "other";
+}
+function marketGroupName(x){
+  const sub=String(x.submarket||"").trim();
+  const name=String(x.underlying_symbol_name||"").toLowerCase();
+  if(sub) return sub.replace(/_/g," ");
+  if(/volatility/.test(name)) return "Volatility indices";
+  if(/crash|boom/.test(name)) return "Crash / Boom";
+  if(/jump/.test(name)) return "Jump";
+  if(/range/.test(name)) return "Range Break";
+  if(/step/.test(name)) return "Step";
+  if(/random/.test(name)) return "Random";
+  return String(x.market||"Other").replace(/_/g," ");
+}
+function filteredSymbols(){
+  const cat=$("marketCategory").value;
+  return symbols.filter(x=>{
+    if(x.exchange_is_open===0 || x.is_trading_suspended===1) return false;
+    return cat==="all" || marketCategory(x)===cat;
+  });
+}
+function populateMarkets(keepSymbol){
+  const list=filteredSymbols();
+  const groups=[...new Set(list.map(marketGroupName))].sort((a,b)=>a.localeCompare(b));
+  const oldGroup=$("marketGroup").value;
+  const oldSymbol=keepSymbol||currentSymbol;
+  $("marketGroup").innerHTML=groups.length
+    ? groups.map(g=>`<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("")
+    : "<option>No active markets</option>";
+  if(groups.includes(oldGroup)) $("marketGroup").value=oldGroup;
+  populateSymbols(oldSymbol);
+}
+function populateSymbols(keepSymbol){
+  const group=$("marketGroup").value;
+  const list=filteredSymbols().filter(x=>marketGroupName(x)===group);
+  const old=keepSymbol||currentSymbol;
+  $("market").innerHTML=list.length
+    ? list.map(x=>`<option value="${escapeHtml(x.underlying_symbol)}">${escapeHtml(x.underlying_symbol_name||x.underlying_symbol)} (${escapeHtml(x.underlying_symbol)})</option>`).join("")
+    : "<option>No active markets</option>";
+  if(list.some(x=>x.underlying_symbol===old)) $("market").value=old;
+  if($("market").value && $("market").value!=="No active markets"){
+    if(currentSymbol!==$("market").value) subscribe($("market").value);
+  }
+}
+function handle(d){
+  if(d.error){log("API error: "+d.error.message);return}
+  if(d.msg_type==="active_symbols"){
+    symbols=d.active_symbols||[];
+    populateMarkets();
+    log(`Loaded ${symbols.length} active symbols from Deriv`);
+  }
+  if(d.msg_type==="history"){
+    if(!scanRequested || d.echo_req?.ticks_history!==currentSymbol) return;
+    const prices=d.history?.prices||[]; const times=d.history?.times||[];
+    ticks=prices.map((p,i)=>({epoch:Number(times[i]||0),quote:Number(p),digit:digitOf(p)})).filter(x=>Number.isFinite(x.quote));
+    $("tickCount").textContent=ticks.length;
+    if(ticks.length>=30) analyze(true);
+    else {scanning=false;scanRequested=false;setScanStatus('Not enough tick history to make a signal.','');$("signalAction").textContent='WAIT';}
+  }
+  if(d.msg_type==="tick"){
+    const t=d.tick; serverEpoch=Number(t.epoch)||serverEpoch; lastTickEpoch=serverEpoch;
+    ticks.push({epoch:serverEpoch,quote:Number(t.quote),digit:digitOf(t.quote)});
+    const max=Math.max(1000,Number($("window").value)); if(ticks.length>max)ticks=ticks.slice(-max);
+    $("tickCount").textContent=ticks.length;$("lastDigit").textContent=digitOf(t.quote);$("quote").textContent=t.quote;
+    $("serverTime").textContent=new Date(serverEpoch*1000).toLocaleTimeString();
+    analyze();
+  }
+}
+function escapeHtml(x){return String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function subscribe(sym){
+  if(subId)send({forget:subId});
+  ticks=[]; currentSymbol=sym;
+  send({ticks:sym,subscribe:1,req_id:2});
+  subId=null; log("Subscribing to "+sym);
+}
+$("marketCategory").onchange=()=>populateMarkets();
+$("marketGroup").onchange=()=>populateSymbols();
+$("market").onchange=e=>subscribe(e.target.value);
+$("window").onchange=()=>analyze();
+$("minConf").onchange=()=>analyze();
+$("mode").onchange=()=>{if(!signalLocked) analyze();};
+$("scanBtn").onclick=startScan;
+$("copyBtn").onclick=async()=>{
+  const v=$("signalDigit").textContent;
+  if(v==='—'||v==='…') return;
+  try{await navigator.clipboard.writeText(v);setScanStatus('Prediction '+v+' copied.','done');}catch(e){setScanStatus('Prediction: '+v,'done');}
+};
+
+function pct(x){return (x*100).toFixed(1)+"%"}
+
+function clearSignalTimer(){
+  if(signalTimer){clearInterval(signalTimer);signalTimer=null}
+}
+function invalidateSignal(){
+  clearSignalTimer(); activeSignal=null; signalLocked=false;
+  $("acceptBtn").style.display="none";
+  $("expired").style.display="block";
+  $("signalAction").textContent="WAIT";
+  $("decision").textContent="EXPIRED";
+}
+function armSignal(action,value,conf,reason){
+  clearSignalTimer();
+  const now=serverEpoch||Math.floor(Date.now()/1000);
+  const expiry=now+15;
+  activeSignal={action,value,conf,reason,created:now,expiry};
+  signalLocked=true;
+  $("acceptBtn").style.display="block";
+  $("acceptBtn").textContent="START 15-SECOND SIGNAL";
+  $("expired").style.display="none";
+  $("decision").textContent="READY";
+  $("reason").textContent=reason+" Signal valid for 15 seconds only.";
+  let left=15;
+  $("countdown").textContent=left+"s";
+  signalTimer=setInterval(()=>{
+    const current=serverEpoch||Math.floor(Date.now()/1000);
+    left=Math.max(0,expiry-current);
+    $("countdown").textContent=left+"s";
+    if(left<=0){
+      invalidateSignal();
+      analyze(true);
+    }
+  },250);
+}
+$("acceptBtn").onclick=()=>{
+  if(!activeSignal)return;
+  $("acceptBtn").style.display="none";
+  $("decision").textContent="ENTRY WINDOW ACTIVE";
+  $("reason").textContent=activeSignal.reason+" The analyzer will not replace this signal until the 15-second window expires.";
+};
+function analyze(force=false){
+  if(signalLocked && activeSignal && !force) return;
+  const n=Math.min(Number($("window").value),ticks.length);
+  if(n<30){$("signalAction").textContent="WAIT";$("confidence").textContent=`Need more ticks (${n}/30)`;return}
+  const a=ticks.slice(-n), counts=Array(10).fill(0);
+  a.forEach(x=>{if(x.digit>=0)counts[x.digit]++});
+  const total=counts.reduce((x,y)=>x+y,0); renderDigits(counts,total);
+  const rates=counts.map(c=>c/total);
+  const recent=a.slice(-30), recentC=Array(10).fill(0); recent.forEach(x=>{if(x.digit>=0)recentC[x.digit]++});
+  const rec=recentC.map(c=>c/recent.length);
+  // Weighted frequency + recency, plus a mild streak-reversal component.
+  const scores=rates.map((r,i)=>0.55*r+0.45*rec[i]);
+  const max=Math.max(...scores), best=scores.indexOf(max);
+  const second=[...scores].sort((x,y)=>y-x)[1]||0;
+  const matchConf=Math.min(.95, Math.max(.5, .5 + (max-second)*2.5 + (max-.1)*1.2));
+  const diffDigit=scores.indexOf(Math.min(...scores));
+  const diffConf=Math.min(.95, Math.max(.5, .8 - scores[diffDigit]*1.8));
+  const overScores=[],underScores=[];
+  for(let b=0;b<=8;b++){
+    const over=rates.slice(b+1).reduce((x,y)=>x+y,0), under=rates.slice(0,b).reduce((x,y)=>x+y,0);
+    overScores.push({b,p:over});underScores.push({b,p:under});
+  }
+  const over=overScores.reduce((x,y)=>y.p>x.p?y:x), under=underScores.reduce((x,y)=>y.p>x.p?y:x);
+  const mode=$("mode").value;
+  let action="WAIT", value="—", conf=0, reason="";
+  if(mode==="MATCH"||mode==="AUTO"){action="MATCH";value=best;conf=matchConf;reason=`Digit ${best} has the strongest weighted recent frequency. Long-window ${(rates[best]*100).toFixed(1)}%, recent ${(rec[best]*100).toFixed(1)}%.`}
+  if(mode==="DIFFERS"){action="DIFFERS";value=diffDigit;conf=diffConf;reason=`Digit ${diffDigit} is currently the least frequent candidate; DIFFERS would avoid matching it.`}
+  if(mode==="OVER"){action="OVER";value=over.b;conf=Math.min(.95,Math.max(.5,over.p));reason=`Barrier ${over.b}: estimated recent probability of final digit > ${over.b} is ${(over.p*100).toFixed(1)}%.`}
+  if(mode==="UNDER"){action="UNDER";value=under.b;conf=Math.min(.95,Math.max(.5,under.p));reason=`Barrier ${under.b}: estimated recent probability of final digit < ${under.b} is ${(under.p*100).toFixed(1)}%.`}
+  const ups=a.slice(-30).filter((x,i)=>i>0&&x.quote>a[a.indexOf(x)-1]?.quote).length;
+  const downs=a.slice(-30).filter((x,i)=>i>0&&x.quote<a[a.indexOf(x)-1]?.quote).length;
+  const dir=(ups+downs)?Math.max(ups,downs)/(ups+downs):0;
+  if(mode==="RISE"||mode==="FALL"){action=ups>=downs?"RISE":"FALL";value="";conf=Math.max(.5,dir);reason=`Last-30-tick direction: ${ups} upward vs ${downs} downward transitions.`}
+  if(mode==="AUTO"){
+    // AUTO compares candidate match, differs, and digit barriers, but suppresses weak signals.
+    const candidates=[
+      {action:"MATCH",value:best,conf:matchConf,reason},
+      {action:"DIFFERS",value:diffDigit,conf:diffConf,reason:`Avoid digit ${diffDigit}; its estimated share is ${(scores[diffDigit]*100).toFixed(1)}%.`},
+      {action:"OVER",value:over.b,conf:over.p,reason:`OVER ${over.b} estimated from the current digit distribution.`},
+      {action:"UNDER",value:under.b,conf:under.p,reason:`UNDER ${under.b} estimated from the current digit distribution.`},
+      {action:ups>=downs?"RISE":"FALL",value:"",conf:dir,reason:`Direction: ${ups} up vs ${downs} down over recent transitions.`}
+    ];
+    const c=candidates.reduce((x,y)=>y.conf>x.conf?y:x); action=c.action;value=c.value;conf=Math.min(.95,c.conf);reason=c.reason;
+  }
+  const min=Number($("minConf").value)/100;
+  if(conf<min){clearSignalTimer();activeSignal=null;signalLocked=false;$("acceptBtn").style.display="none";$("expired").style.display="none";$("signalAction").textContent="NO SIGNAL";$("contract").textContent=currentSymbol||"MARKET";$("signalDigit").textContent="—";$("confidence").textContent=`Best estimated signal ${pct(conf)} — below ${pct(min)} threshold`;$("decision").textContent="NO SIGNAL";$("reason").textContent=reason; if(scanRequested){scanning=false;scanRequested=false;setScanStatus('Done — no prediction passed your minimum confidence threshold.','');speak('Done. No valid prediction.');} return}
+  $("contract").textContent=(currentSymbol||"MARKET")+" • "+action;
+  $("signalDigit").textContent=value;
+  $("signalAction").textContent=action;
+  $("confidence").textContent="Model confidence: "+pct(conf);
+  $("decision").textContent="READY";
+  $("reason").textContent=reason;
+  updateWindow();
+  armSignal(action,value,conf,reason);
+  backtest(a,action,value);
+  if(scanRequested) finishScanVoice(action,value,conf);
+}
+function renderDigits(c,total){
+  $("digits").innerHTML=c.map((v,i)=>`<tr><td>${i}</td><td>${v}</td><td>${pct(v/total)}</td><td><div class="bar"><div class="fill" style="width:${(v/total*100).toFixed(1)}%"></div></div></td></tr>`).join("");
+}
+function backtest(a,action,value){
+  // Simple walk-forward evaluation: for each historical point, infer the next target
+  // using the preceding window, then evaluate the immediately following tick.
+  let wins=0,n=0; const W=Math.min(100,a.length-2);
+  for(let i=W;i<a.length-1;i++){
+    const hist=a.slice(i-W,i), c=Array(10).fill(0);
+    hist.forEach(x=>{if(x.digit>=0)c[x.digit]++});
+    const total=c.reduce((x,y)=>x+y,0); if(!total)continue;
+    const rates=c.map(x=>x/total), best=rates.indexOf(Math.max(...rates));
+    let ok=false;
+    if(action==="MATCH")ok=a[i].digit===best;
+    else if(action==="DIFFERS")ok=a[i].digit!==value;
+    else if(action==="OVER")ok=a[i].digit>Number(value);
+    else if(action==="UNDER")ok=a[i].digit<Number(value);
+    else if(action==="RISE")ok=a[i+1].quote>a[i].quote;
+    else if(action==="FALL")ok=a[i+1].quote<a[i].quote;
+    else continue;
+    wins+=ok?1:0;n++;
+  }
+  $("btN").textContent=n;$("btWins").textContent=wins;$("btLoss").textContent=Math.max(0,n-wins);$("btRate").textContent=n?pct(wins/n):"—";
+}
+function updateWindow(){
+  const now=serverEpoch||Math.floor(Date.now()/1000);
+  if(activeSignal){ $("countdown").textContent=Math.max(0,activeSignal.expiry-now)+"s"; return; }
+  const next=Math.floor(now/15)*15+15, remain=next-now;
+  const st=new Date(next*1000).toLocaleTimeString(), en=new Date((next+15)*1000).toLocaleTimeString();
+  $("entryWindow").textContent=st+" → "+en;$("countdown").textContent=Math.max(0,remain)+"s";
+}
+setInterval(()=>{if(lastTickEpoch){serverEpoch+=1;updateWindow();$("serverTime").textContent=new Date(serverEpoch*1000).toLocaleTimeString()}},1000);
+
+$("connectBtn").onclick=()=>{
+  alert("Production account connection should use Deriv OAuth 2.0 + PKCE. This standalone analyzer intentionally does not collect or store your Deriv password or secret token. After registering your Deriv OAuth app, connect the callback/backend to this page.");
+};
+$("demoBtn").onclick=()=>{
+  alert("Demo trading is supported by Deriv's authenticated WebSocket, but requires a registered OAuth/PAT application and secure backend token handling. This build starts the live public market analyzer immediately; it does not place trades.");
+};
+connect();
+</script>
+</body>
+</html>
